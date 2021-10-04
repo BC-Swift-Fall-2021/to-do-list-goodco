@@ -6,6 +6,7 @@
 //
 
 import UIKit
+import UserNotifications
 
 private let dateFormatter: DateFormatter = {
     let dateFormatter = DateFormatter()
@@ -33,10 +34,26 @@ class ToDoDetailTableViewController: UITableViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         
+        // setup foreground notification
+        let notificationCenter = NotificationCenter.default
+        notificationCenter.addObserver(self, selector: #selector(appActiveNotification), name: UIApplication.didBecomeActiveNotification, object: nil)
+        
+        // hide the keyboard if we tap outside of a field or view:
+        let tap = UITapGestureRecognizer(target: self.view, action: #selector(UIView.endEditing(_:)))
+        tap.cancelsTouchesInView = false
+        self.view.addGestureRecognizer(tap)
+        
+        nameField.delegate = self
+        
         if toDoItem == nil{
-            toDoItem = ToDoItem(name: "", date: Date().addingTimeInterval(24*60*60), notes: "", reminderSet: false)
+            toDoItem = ToDoItem(name: "", date: Date().addingTimeInterval(24*60*60), notes: "", reminderSet: false, completed: false)
+            nameField.becomeFirstResponder()
         }
         updateUI()
+    }
+    
+    @objc func appActiveNotification(){
+        updateReminderSwitch()
     }
     
     func updateUI(){
@@ -46,10 +63,37 @@ class ToDoDetailTableViewController: UITableViewController {
         reminderSwitch.isOn = toDoItem.reminderSet
         dateLabel.textColor = (reminderSwitch.isOn ? .black : .gray)
         dateLabel.text = dateFormatter.string(from: toDoItem.date)
+        enableDisableSaveButton(text: nameField.text!)
+        updateReminderSwitch()
+    }
+    
+    func updateReminderSwitch(){
+        LocalNotificationsManager.isAuthorized { authorized in
+            DispatchQueue.main.async {
+                if !authorized && self.reminderSwitch.isOn{
+                    self.oneButtonAlert(title: "User Has Not Allowed Notifications", message: "To receive alerts for reminders, open Settings, select To Do List > Notifications > Allow Notifications.")
+                    self.reminderSwitch.isOn = false
+                }
+                self.view.endEditing(true)
+                self.dateLabel.textColor = (self.reminderSwitch.isOn ? .black : .gray)
+                self.tableView.beginUpdates()
+                self.tableView.endUpdates()
+            }
+        }
     }
 
     override func prepare(for segue: UIStoryboardSegue, sender: Any?) {
-        toDoItem = ToDoItem(name: nameField.text!, date: datePicker.date, notes: noteView.text, reminderSet: reminderSwitch.isOn)
+        toDoItem = ToDoItem(name: nameField.text!, date: datePicker.date, notes: noteView.text, reminderSet: reminderSwitch.isOn, completed: toDoItem.completed)
+    }
+    
+    func enableDisableSaveButton(text: String){
+        if text.count > 0{
+            saveBarButton.isEnabled = true
+        }
+        else{
+            saveBarButton.isEnabled = false
+        }
+
     }
    
     @IBAction func cancelButtonPressed(_ sender: UIBarButtonItem) {
@@ -63,15 +107,19 @@ class ToDoDetailTableViewController: UITableViewController {
     }
     
     @IBAction func reminderSwitchChanged(_ sender: UISwitch) {
-        dateLabel.textColor = (reminderSwitch.isOn ? .black : .gray)
-        tableView.beginUpdates()
-        tableView.endUpdates()
+        updateReminderSwitch()
     }
     
     
     @IBAction func datePickerChanged(_ sender: UIDatePicker) {
+        self.view.endEditing(true)
         dateLabel.text = dateFormatter.string(from: sender.date)
     }
+    
+    @IBAction func textFieldEditingChanged(_ sender: UITextField) {
+        enableDisableSaveButton(text: sender.text!)
+    }
+    
     
 }
 
@@ -79,11 +127,19 @@ extension ToDoDetailTableViewController {
     override func tableView(_ tableView: UITableView, heightForRowAt indexPath: IndexPath) -> CGFloat {
         switch indexPath{
         case datePickerIndexPath:
-            return reminderSwitch.isOn ? datePicker.frame.height : 0
+            return reminderSwitch.isOn ? defaultRowHeight : 0.01 //set to default height b/c updated date picker is now row height
         case notesTextViewIndexPath:
             return notesRowHeight
         default:
             return defaultRowHeight
         }
+    }
+}
+
+extension ToDoDetailTableViewController: UITextFieldDelegate {
+    
+    func textFieldShouldReturn(_ textField: UITextField) -> Bool {
+        noteView.becomeFirstResponder()
+        return true
     }
 }
